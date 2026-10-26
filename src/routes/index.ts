@@ -26,6 +26,7 @@ import dailyReportRoutes from "./dailyReportRoutes.js";
 import salaryRoutes from "./salary.routes.js";
 import integrationRoutes from "./integration.routes.js";
 import notificationRoutes from "./notification.routes.js";
+import chatRoutes from "./chat.routes.js";
 
 const router = Router();
 
@@ -64,5 +65,6 @@ router.use("/daily-reports", dailyReportRoutes);
 router.use("/salary", salaryRoutes);
 router.use("/integrations", integrationRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/chat", chatRoutes);
 
 export default router;
