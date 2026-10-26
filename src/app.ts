@@ -10,6 +10,8 @@ import apiRoutes from "./routes/index.js";
 import integrationWebhookRoutes from "./routes/integrationWebhook.routes.js";
 import { errorHandler } from "./middleware/error.middleware.js";
 import { initSocket } from "./socket/index.js";
+import { connectDatabase } from "./config/database.js";
+import { requireDatabase } from "./middleware/database.middleware.js";
 
 const app = express();
 
@@ -27,6 +29,8 @@ const allowedOrigins = [
   "http://3.24.190.193",
   "https://apex-crm-xi.vercel.app",
   "https://www.dealqix.com",
+  "https://dealqix.com",
+  env.clientUrl,
 ];
 
 app.use(
@@ -61,6 +65,18 @@ app.use(
 );
 
 app.use(cookieParser());
+
+// Liveness only: this deliberately does not claim database readiness.
+app.get("/healthz", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.status(200).json({ success: true, service: "crm-api", check: "liveness" });
+});
+
+// Vercel imports the Express app, rather than invoking src/server.ts.
+// Keep the existing AWS listener/startup unchanged.
+if (process.env.VERCEL === "1") {
+  app.use("/api/v1", requireDatabase(connectDatabase));
+}
 
 // Provider webhooks go before the logger and the global limiter: the URL
 // carries a secret that must not reach access logs (see the route file).
