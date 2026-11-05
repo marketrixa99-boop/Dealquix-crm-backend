@@ -15,6 +15,7 @@ export const targetDate = z
   }, "Enter a valid calendar date");
 const fields = {
   title: z.string().trim().min(2).max(150),
+  description: z.string().trim().max(5000).optional(),
   targetAmount: z
     .number()
     .positive()
@@ -31,6 +32,21 @@ const orderedDates = (v: { startDate: string; endDate: string }) =>
   Date.parse(v.endDate) - Date.parse(v.startDate) <= 365 * 86400000;
 export const createRevenueTargetInput = z
   .object({ ...fields, branchId: targetId })
+  .strict()
+  .refine(orderedDates, "End date must follow start date, within one year");
+export const createRevenueTargetBatchInput = z
+  .object({
+    ...fields,
+    branchIds: z
+      .array(targetId)
+      .min(1)
+      .max(50)
+      .refine(
+        (ids) => new Set(ids.map((id) => id.toLowerCase())).size === ids.length,
+        "Select each branch only once",
+      ),
+    requestId: z.uuid(),
+  })
   .strict()
   .refine(orderedDates, "End date must follow start date, within one year");
 export const editRevenueTargetInput = z
