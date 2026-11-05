@@ -9,6 +9,8 @@ const startServer = async (): Promise<void> => {
     // Ensure the cross-instance deduplication constraint exists before sweeping.
     const { Notification } = await import("./models/Notification.js");
     await Notification.collection.createIndex({ dedupeKey: 1 }, { unique: true, sparse: true });
+    const { TeamChatMessage } = await import("./models/TeamChatMessage.js");
+    await TeamChatMessage.collection.createIndex({ branch: 1, sender: 1, clientMessageId: 1 }, { unique: true });
     startFollowUpReminders();
 
     app.listen(env.port, () => {

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import teamChatRoutes from "./teamChat.routes.js";
 import operationsRoutes from "./operations.routes.js";
 import branchRoutes from "./branch.routes.js";
 import authRoutes from "./auth.routes.js";
@@ -29,6 +30,7 @@ import integrationRoutes from "./integration.routes.js";
 import notificationRoutes from "./notification.routes.js";
 
 const router = Router();
+router.use("/team-chat", teamChatRoutes);
 router.use("/operations", operationsRoutes);
 
 router.get("/health", (_req, res) => {
