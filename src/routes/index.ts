@@ -1,4 +1,5 @@
 import { Router } from "express";
+import operationsRoutes from "./operations.routes.js";
 import branchRoutes from "./branch.routes.js";
 import authRoutes from "./auth.routes.js";
 import userRoutes from "./user.routes.js";
@@ -28,6 +29,7 @@ import integrationRoutes from "./integration.routes.js";
 import notificationRoutes from "./notification.routes.js";
 
 const router = Router();
+router.use("/operations", operationsRoutes);
 
 router.get("/health", (_req, res) => {
   res.status(200).json({
