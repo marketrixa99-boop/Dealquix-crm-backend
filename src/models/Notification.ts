@@ -69,6 +69,7 @@ export type NotificationType =
   (typeof NOTIFICATION_TYPES)[keyof typeof NOTIFICATION_TYPES];
 
 export interface INotification extends Document {
+  dedupeKey?: string;
   recipient: Types.ObjectId;
   sender?: Types.ObjectId;
   type: NotificationType;
@@ -84,6 +85,7 @@ export interface INotification extends Document {
 
 const notificationSchema = new Schema<INotification>(
   {
+    dedupeKey: { type: String },
     recipient: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -107,6 +109,7 @@ const notificationSchema = new Schema<INotification>(
 );
 
 notificationSchema.index({ recipient: 1, isRead: 1, createdAt: -1 });
+notificationSchema.index({ dedupeKey: 1 }, { unique: true, sparse: true });
 
 export const Notification: Model<INotification> =
   mongoose.models.Notification ||

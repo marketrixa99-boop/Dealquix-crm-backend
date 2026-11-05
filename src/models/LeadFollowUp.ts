@@ -6,6 +6,8 @@ import {
 } from "../constants/leadFollowUpStatus.js";
 
 export interface ILeadFollowUp extends Document {
+  reminderSentAt?: Date;
+  escalatedAt?: Date;
   lead: mongoose.Types.ObjectId;
 
   assignedTo: mongoose.Types.ObjectId;
@@ -31,6 +33,8 @@ export interface ILeadFollowUp extends Document {
 
 const leadFollowUpSchema = new Schema<ILeadFollowUp>(
   {
+    reminderSentAt: Date,
+    escalatedAt: Date,
     lead: {
       type: Schema.Types.ObjectId,
       ref: "Lead",

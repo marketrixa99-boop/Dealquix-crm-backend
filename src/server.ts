@@ -1,10 +1,15 @@
 import app from "./app.js";
 import { connectDatabase } from "./config/database.js";
 import { env } from "./config/env.js";
+import { startFollowUpReminders } from "./services/followup-reminder.service.js";
 
 const startServer = async (): Promise<void> => {
   try {
     await connectDatabase();
+    // Ensure the cross-instance deduplication constraint exists before sweeping.
+    const { Notification } = await import("./models/Notification.js");
+    await Notification.collection.createIndex({ dedupeKey: 1 }, { unique: true, sparse: true });
+    startFollowUpReminders();
 
     app.listen(env.port, () => {
       console.log(
