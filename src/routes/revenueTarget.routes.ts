@@ -12,6 +12,7 @@ import { PERMISSIONS } from "../constants/permissions.js";
 import { Branch } from "../models/Branch.js";
 import { BranchRevenueTarget } from "../models/BranchRevenueTarget.js";
 import { AppError } from "../utils/AppError.js";
+import { createBranchRevenueTasks } from "../services/revenue-target-batch.service.js";
 import {
   createRevenueTargetInput,
   editRevenueTargetInput,
@@ -24,6 +25,7 @@ const router = Router();
 type TargetRow = {
   _id: Types.ObjectId;
   title: string;
+  description?: string;
   branch: Types.ObjectId;
   branchName: string;
   targetAmount: number;
@@ -165,6 +167,7 @@ router.get(
             {
               $project: {
                 title: 1,
+                description: 1,
                 branch: 1,
                 targetAmount: 1,
                 startDate: 1,
@@ -222,6 +225,13 @@ router.get(
 );
 
 router.post(
+  "/batch",
+  headOnly,
+  wrap(async (req, res) => {
+    send(res, await createBranchRevenueTasks(req.body, req.user!.id), 201);
+  }),
+);
+router.post(
   "/",
   headOnly,
   wrap(async (req, res) => {
@@ -230,6 +240,7 @@ router.post(
       throw new AppError("Choose an active branch", 400);
     const target = await BranchRevenueTarget.create({
       title: input.title,
+      description: input.description,
       branch: input.branchId,
       targetAmount: input.targetAmount,
       startDate: input.startDate,

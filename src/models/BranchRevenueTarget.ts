@@ -3,6 +3,8 @@ import { Schema, model } from "mongoose";
 const schema = new Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 150 },
+    description: { type: String, trim: true, maxlength: 5000 },
+    batch: { type: String, index: true },
     branch: { type: Schema.Types.ObjectId, ref: "Branch", required: true },
     targetAmount: { type: Number, required: true, min: 0.01 },
     startDate: { type: String, required: true },
