@@ -74,7 +74,7 @@ export async function createBranchRevenueTasks(
           createdBy: actorId,
           updatedBy: actorId,
         })),
-        { session },
+        { session, ordered: true },
       );
     });
   } catch (error) {

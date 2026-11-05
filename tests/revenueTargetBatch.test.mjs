@@ -90,6 +90,7 @@ test("batch creates one isolated target per branch atomically and replay does no
   });
   t.mock.method(BranchRevenueTarget, "create", async (docs, options) => {
     assert.equal(options.session, session);
+    assert.equal(options.ordered, true);
     targets.push(...docs);
     if (failCreate) throw new Error("simulated persistence failure");
     return docs;
