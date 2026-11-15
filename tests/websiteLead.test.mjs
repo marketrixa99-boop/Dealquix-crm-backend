@@ -1,0 +1,28 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import mongoose from 'mongoose';
+import router from '../dist/routes/websiteLead.routes.js';
+import { User } from '../dist/models/User.js';
+import { Lead } from '../dist/models/Lead.js';
+import { errorHandler } from '../dist/middleware/error.middleware.js';
+const key = 'test-only-website-key-12345678901234567890';
+const payload = {submissionId:'b3f3cbef-19ba-4c87-8889-76ed45ef9b61',name:'Integration Test',email:'test@example.com',phoneCountryCode:'+1',phone:'2025550100',message:'Test enquiry'};
+test('website intake authentication, validation, atomic creation and retry', async t => {
+ process.env.MASTERXTRADER_LEAD_SECRET=key; process.env.MASTERXTRADER_LEAD_OWNER_EMAIL='head@dealqix.com';
+ const app=express();app.use(express.json(),router,errorHandler);const server=app.listen(0,'127.0.0.1');
+ await new Promise(r=>server.once('listening',r));t.after(()=>server.close());
+ const post=(body,secret=key)=>fetch(`http://127.0.0.1:${server.address().port}/masterxtrader`,{method:'POST',headers:{'Content-Type':'application/json','x-website-lead-key':secret},body:JSON.stringify(body)});
+ assert.equal((await post(payload,'wrong')).status,401);
+ assert.equal((await post({...payload,branchId:'injected'})).status,400);
+ const Receipt=mongoose.models.WebsiteLeadReceipt;let stored;let writes=0;
+ t.mock.method(Receipt,'findById',()=>({lean:async()=>stored}));
+ t.mock.method(User,'findOne',query=>{assert.equal(query.role,'head');assert.equal(query.isActive,true);return {select:async()=>({_id:new mongoose.Types.ObjectId()})};});
+ t.mock.method(mongoose.connection,'transaction',async fn=>fn({test:true}));
+ t.mock.method(Receipt,'create',async docs=>{stored=docs[0];});
+ t.mock.method(Lead,'create',async (docs,options)=>{writes++;assert.ok(options.session);assert.equal(docs[0].source,'MasterXTrader Website');assert.equal(docs[0].status,'new');assert.equal(docs[0].branch,undefined);assert.equal(docs[0].message,payload.message);});
+ assert.equal((await post(payload)).status,201);
+ assert.equal((await post(payload)).status,200);assert.equal(writes,1);
+ delete process.env.MASTERXTRADER_LEAD_SECRET;
+ assert.equal((await post(payload)).status,503);
+});
