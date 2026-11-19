@@ -16,6 +16,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // =========================================================
 
   [ROLES.ADMIN]: [
+    PERMISSIONS.DIALER_AGENT_VIEW,
+    PERMISSIONS.DIALER_AGENT_MANAGE,
     // Users
     PERMISSIONS.USER_VIEW,
     PERMISSIONS.USER_CREATE,

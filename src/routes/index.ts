@@ -23,7 +23,6 @@ import performanceRoutes from "./performance.routes.js";
 import revenueRoutes from "./revenue.routes.js";
 import contestRoutes from "./contest.routes.js";
 import uploadRoutes from "./upload.routes.js";
-import stringeeNumberroutes from "./stringeeNumber.routes.js";
 import activityLogRoutes from "./activityLog.routes.js";
 import reportRoutes from "./report.routes.js";
 import dailyReportRoutes from "./dailyReportRoutes.js";
@@ -65,7 +64,9 @@ router.use("/leave-balances", leaveBalanceRoutes);
 router.use("/performance", performanceRoutes);
 router.use("/revenue", revenueRoutes);
 router.use("/contest", contestRoutes);
-router.use("/stringee-numbers", stringeeNumberroutes);
+router.use("/stringee-numbers", (_req, res) => {
+  res.status(410).json({ success: false, message: "Stringee numbers have been replaced by Dialixa agent extensions.", code: "DIALER_REPLACED" });
+});
 router.use("/activity-logs", activityLogRoutes);
 router.use("/reports", reportRoutes);
 router.use("/daily-reports", dailyReportRoutes);

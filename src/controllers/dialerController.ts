@@ -1,345 +1,14 @@
 import { Request, Response } from "express";
 import { Types } from "mongoose";
-import {
-  generateStringeeToken,
-  generateStringeeRestToken,
-} from "../utils/stringeeToken.js";
+import { generateStringeeRestToken } from "../utils/stringeeToken.js";
 import { CallLog } from "../models/CallLog.js";
 import { Lead } from "../models/Lead.js";
-import { createLeadActivity } from "../services/lead.service.js";
 import { User } from "../models/User.js";
-import { StringeeNumber } from "../models/StringeeNumber.js";
 import axios from "axios";
+import { operationsScope } from "../validators/operations.validator.js";
+import { AppError } from "../utils/AppError.js";
 
-export const getStringeeTokenController = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const token = generateStringeeToken(req.user.id.toString());
-    return res.status(200).json({ success: true, token });
-  } catch (error: any) {
-    return res.status(500).json({ message: error.message });
-  }
-};
-
-/**
- * Stringee Answer URL Webhook
- * Returned SCCO structure per Stringee Web SDK specification
- */
-export const handleAnswerUrlWebhook = async (req: Request, res: Response) => {
-  console.log("=== [STRINGEE ANSWER URL WEBHOOK TRIGGERED] ===");
-  console.log("Query:", JSON.stringify(req.query, null, 2));
-  console.log("Body:", JSON.stringify(req.body, null, 2));
-
-  try {
-    const body = req.body || {};
-    const query = req.query || {};
-
-    const rawTo = query.to || body.to || "";
-    const rawFrom = query.from || body.from || "";
-
-    const rawCustomData =
-      query.custom_data ||
-      body.custom_data ||
-      query.customData ||
-      body.customData ||
-      "";
-
-    let customDataString = "";
-    if (typeof rawCustomData === "object") {
-      customDataString = JSON.stringify(rawCustomData);
-    } else {
-      customDataString = String(rawCustomData);
-    }
-
-    const cleanTo = String(rawTo).replace(/[^\d+]/g, "");
-
-    // 1. Dynamic Caller ID Resolution
-    let outboundCallerId =
-      process.env.STRINGEE_HOTLINE_NUMBER || "917944412839";
-
-    if (rawFrom) {
-      const assignedNumberDoc = await StringeeNumber.findOne({
-        assignedTo: rawFrom,
-        isActive: true,
-      }).lean();
-
-      if (assignedNumberDoc?.phoneNumber) {
-        outboundCallerId = assignedNumberDoc.phoneNumber;
-      }
-    }
-
-    const cleanCallerId = String(outboundCallerId).replace(/[^\d+]/g, "");
-    const eventWebhookUrl = `${process.env.BACKEND_URL}/api/v1/dialer/events`;
-
-    // 2. Standard Stringee SCCO Payload Response
-    const scco = [
-      {
-        action: "record",
-        eventUrl: eventWebhookUrl,
-        format: "wav",
-      },
-      {
-        action: "connect",
-        from: {
-          type: "internal",
-          number: cleanCallerId,
-          alias: cleanCallerId,
-        },
-        to: {
-          type: "external",
-          number: cleanTo,
-          alias: cleanTo,
-        },
-        customData: customDataString,
-        timeout: 60,
-      },
-    ];
-
-    res.setHeader("Content-Type", "application/json");
-    return res.status(200).json(scco);
-  } catch (error: any) {
-    console.error("[Stringee Webhook Error]:", error);
-    return res.status(500).json({ error: error.message });
-  }
-};
-
-/**
- * Stringee Call Events Webhook
- * Manages Call Status, Call Failures/Unanswered calls, and Recording URLs
- */
-export const handleCallEventsWebhook = async (req: Request, res: Response) => {
-  console.log("=== [STRINGEE EVENT WEBHOOK TRIGGERED] ===");
-  console.log("Query:", JSON.stringify(req.query, null, 2));
-  console.log("Body:", JSON.stringify(req.body, null, 2));
-
-  try {
-    const payload = { ...req.query, ...req.body };
-
-    const {
-      call_id,
-      call_status,
-      event_type,
-      action,
-      duration,
-      answerDuration,
-      record_url,
-      recording_url,
-      recordUrl,
-      request_from_user_id,
-      actor,
-      from,
-      to,
-      sip_code,
-      reason,
-    } = payload;
-
-    if (!call_id) {
-      return res.status(200).json({ status: "ignored_no_call_id" });
-    }
-
-    // Capture recording URL across all potential payload keys
-    const finalRecordingUrl =
-      record_url ||
-      recording_url ||
-      recordUrl ||
-      payload?.recording?.url ||
-      payload?.recording_url ||
-      "";
-
-    const rawEventType = String(
-      event_type || action || call_status || "",
-    ).toLowerCase();
-
-    // ------------------------------------------------------------------------
-    // 1. DEDICATED ASYNC RECORDING EVENT HANDLER
-    // Stringee posts recording URLs after the call session ends.
-    // ------------------------------------------------------------------------
-    if (rawEventType.includes("record") || finalRecordingUrl) {
-      if (finalRecordingUrl) {
-        await CallLog.findOneAndUpdate(
-          { callId: call_id },
-          { $set: { recordingUrl: finalRecordingUrl } },
-          { upsert: true },
-        );
-        return res.status(200).json({ status: "recording_updated" });
-      }
-    }
-
-    // ------------------------------------------------------------------------
-    // 2. PARSE PHONE NUMBERS & METADATA
-    // ------------------------------------------------------------------------
-    const callerFrom =
-      (typeof from === "object" ? from?.number : from) || "Unknown";
-    const callerTo = (typeof to === "object" ? to?.number : to) || "Unknown";
-
-    const rawUserId = request_from_user_id || actor;
-    let userId: string | null = null;
-    let branchId: string | null = null;
-
-    if (rawUserId) {
-      const user = await User.findById(rawUserId).select("_id branches").lean();
-      if (user) {
-        userId = user._id.toString();
-        if (user.branches?.length) {
-          branchId = Array.isArray(user.branches)
-            ? user?.branches[0]?.toString()
-            : (user.branches as any).toString();
-        }
-      }
-    }
-
-    // Map Lead by destination phone number (last 10 digits match)
-    let leadId: string | null = null;
-    if (callerTo && callerTo !== "Unknown") {
-      const cleanPhone = String(callerTo).slice(-10);
-      const matchedLead = await Lead.findOne({
-        phone: new RegExp(cleanPhone + "$"),
-        isDeleted: { $ne: true },
-      })
-        .select("_id")
-        .lean();
-
-      if (matchedLead) {
-        leadId = matchedLead._id.toString();
-      }
-    }
-
-    // ------------------------------------------------------------------------
-    // 3. COMPLETE CALL STATUS NORMALIZATION
-    // Handles picked, unpicked, busy, rejected, and failed connections
-    // ------------------------------------------------------------------------
-    let normalizedStatus:
-      | "started"
-      | "answered"
-      | "ended"
-      | "missed"
-      | "rejected"
-      | "failed" = "started";
-
-    const combinedReason = String(reason || "").toLowerCase();
-
-    // On the `ended` event Stringee's `duration` is the whole call INCLUDING
-    // ringing; `answerDuration` is the talk time (0 when nobody picked up).
-    // Using `duration` marked every rung-but-unanswered call as "ended" — and
-    // Stringee never records those, which looked like missing recordings.
-    const talkSeconds =
-      answerDuration !== undefined
-        ? parseInt(String(answerDuration), 10) || 0
-        : parseInt(String(duration || "0"), 10) || 0;
-
-    if (
-      rawEventType.includes("ended") ||
-      rawEventType.includes("completed") ||
-      rawEventType.includes("hangup")
-    ) {
-      normalizedStatus = talkSeconds > 0 ? "ended" : "missed";
-    } else if (
-      rawEventType.includes("answered") ||
-      rawEventType.includes("accept")
-    ) {
-      normalizedStatus = "answered";
-    } else if (
-      rawEventType.includes("busy") ||
-      rawEventType.includes("user_busy") ||
-      combinedReason.includes("busy")
-    ) {
-      normalizedStatus = "rejected";
-    } else if (
-      rawEventType.includes("no_answer") ||
-      rawEventType.includes("missed") ||
-      rawEventType.includes("timeout") ||
-      combinedReason.includes("timeout") ||
-      combinedReason.includes("no answer")
-    ) {
-      normalizedStatus = "missed";
-    } else if (
-      rawEventType.includes("reject") ||
-      rawEventType.includes("cancel") ||
-      combinedReason.includes("rejected")
-    ) {
-      normalizedStatus = "rejected";
-    } else if (
-      rawEventType.includes("failed") ||
-      sip_code >= 400 ||
-      combinedReason.includes("unallocated") ||
-      combinedReason.includes("failed")
-    ) {
-      normalizedStatus = "failed";
-    }
-
-    // ------------------------------------------------------------------------
-    // 4. UPSERT CALL LOG RECORD
-    // ------------------------------------------------------------------------
-    const updateData: any = {
-      callStatus: normalizedStatus,
-      fromNumber: String(callerFrom),
-      toNumber: String(callerTo),
-    };
-
-    // Store talk time (0 if the call was not connected/answered)
-    if (["missed", "rejected", "failed"].includes(normalizedStatus)) {
-      updateData.duration = 0;
-    } else if (answerDuration !== undefined || duration !== undefined) {
-      updateData.duration = talkSeconds;
-    }
-
-    if (finalRecordingUrl) updateData.recordingUrl = finalRecordingUrl;
-    if (userId) updateData.caller = userId;
-    if (branchId) updateData.branch = branchId;
-    if (leadId) updateData.lead = leadId;
-
-    const updatedLog = await CallLog.findOneAndUpdate(
-      { callId: call_id },
-      { $set: updateData },
-      { upsert: true, returnDocument: "after" },
-    );
-
-    // ------------------------------------------------------------------------
-    // 5. CREATE LEAD ACTIVITY RECORD
-    // ------------------------------------------------------------------------
-    if (
-      leadId &&
-      userId &&
-      ["ended", "missed", "rejected"].includes(normalizedStatus)
-    ) {
-      const callDuration = updateData.duration || 0;
-      let statusRemark = `Outbound call ${normalizedStatus}.`;
-      if (normalizedStatus === "ended") {
-        statusRemark = `Outbound call ended. Duration: ${callDuration}s`;
-      } else if (normalizedStatus === "missed") {
-        statusRemark = `Outbound call unanswered (No answer / Timeout).`;
-      } else if (normalizedStatus === "rejected") {
-        statusRemark = `Outbound call rejected (Line busy).`;
-      }
-
-      await createLeadActivity({
-        leadId,
-        activityType: "call_logged",
-        performedBy: userId,
-        remark: statusRemark,
-        metadata: {
-          callId: call_id,
-          recordingUrl: updatedLog?.recordingUrl || finalRecordingUrl,
-          branchId,
-          status: normalizedStatus,
-          duration: callDuration,
-        },
-      });
-    }
-
-    return res.status(200).json({ status: "success" });
-  } catch (error: any) {
-    console.error("[Call Event Error]:", error);
-    return res.status(500).json({ message: error.message });
-  }
-};
-
+// Historical calls and recordings remain readable after the provider switch.
 export const getLeadCallHistoryController = async (
   req: Request,
   res: Response,
@@ -347,20 +16,13 @@ export const getLeadCallHistoryController = async (
   try {
     const { leadId } = req.params;
 
-    const lead = await Lead.findById(leadId);
+    if (!Types.ObjectId.isValid(String(leadId))) return res.status(400).json({ message: "Invalid lead ID" });
+    const lead = await Lead.findOne({ _id: leadId, isDeleted: false, ...operationsScope(req.user!) });
     if (!lead || lead.isDeleted) {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    const query: any = { lead: leadId };
-
-    if (req.user?.role !== "head") {
-      query.caller = req.user?.id;
-    } else if (req.user?.branches) {
-      query.branch = Array.isArray(req.user.branches)
-        ? { $in: req.user.branches }
-        : req.user.branches;
-    }
+    const query = { lead: leadId, ...operationsScope(req.user!, undefined, "caller") };
 
     const calls = await CallLog.find(query)
       .populate("caller", "name email role")
@@ -374,26 +36,21 @@ export const getLeadCallHistoryController = async (
 
 export const getCallLogs = async (req: Request, res: Response) => {
   try {
-    const limit = parseInt(req.query.limit as string) || 10;
-    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 10));
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const skip = (page - 1) * limit;
 
     const { status, leadId, userId, branchId, search, startDate, endDate } =
       req.query;
 
-    const filter: any = {};
+    const filter: any = operationsScope(req.user!, branchId ? String(branchId) : undefined, "caller");
 
     const toObjectId = (value: unknown): unknown => {
       const raw = String(value);
       return Types.ObjectId.isValid(raw) ? new Types.ObjectId(raw) : value;
     };
 
-    if (req.user?.role !== "head") {
-      filter.caller = toObjectId(req.user?.id);
-    } else {
-      if (userId) filter.caller = toObjectId(userId);
-      if (branchId) filter.branch = toObjectId(branchId);
-    }
+    if (userId && req.user?.role !== "employee") filter.caller = toObjectId(userId);
 
     if (status) filter.callStatus = status;
     if (leadId) filter.lead = toObjectId(leadId);
@@ -409,7 +66,7 @@ export const getCallLogs = async (req: Request, res: Response) => {
     }
 
     if (search) {
-      const searchRegex = new RegExp(String(search), "i");
+      const searchRegex = new RegExp(String(search).slice(0, 150).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
 
       const matchedLeads = await Lead.find({
         $or: [{ name: searchRegex }, { phone: searchRegex }],
@@ -491,6 +148,7 @@ export const getCallLogs = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error("[Get Call Logs Error]:", error);
+    if (error instanceof AppError) return res.status(error.statusCode).json({ success: false, message: error.message });
     return res.status(500).json({ message: error.message });
   }
 };
@@ -499,7 +157,8 @@ export const getCallLogById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    const log = await CallLog.findById(id)
+    if (!Types.ObjectId.isValid(String(id))) return res.status(400).json({ message: "Invalid call log ID" });
+    const log = await CallLog.findOne({ _id: id, ...operationsScope(req.user!, undefined, "caller") })
       .populate("lead")
       .populate("caller", "name email")
       .populate("branch", "name")

@@ -21,6 +21,8 @@ export interface IUser extends Document {
   role: Role;
   branches: Types.ObjectId[];
   isActive: boolean;
+  dialixaExtension?: string;
+  dialerEnabled: boolean;
   createdBy?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -65,6 +67,9 @@ const userSchema = new Schema<IUser>(
       default: true,
     },
 
+    dialixaExtension: { type: String, trim: true, match: /^\d{2,20}$/ },
+    dialerEnabled: { type: Boolean, default: false },
+
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -74,6 +79,11 @@ const userSchema = new Schema<IUser>(
     timestamps: true,
   },
 );
+
+userSchema.index({ dialixaExtension: 1 }, {
+  unique: true,
+  partialFilterExpression: { dialixaExtension: { $type: "string" } },
+});
 
 export const User: Model<IUser> =
   mongoose.models.User ||

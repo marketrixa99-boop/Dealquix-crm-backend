@@ -99,6 +99,8 @@ export const PERMISSIONS = {
   CALL_LOG_VIEW: "call-log:view",
   CALL_RECORDING_LISTEN: "call-recording:listen",
 
+  DIALER_AGENT_VIEW: "dialer_agent:view",
+  DIALER_AGENT_MANAGE: "dialer_agent:manage",
   STRINGEE_NUMBER_CREATE: "stringee_number:create",
   STRINGEE_NUMBER_UPDATE: "stringee_number:update",
   STRINGEE_NUMBER_VIEW: "stringee_number:view",
